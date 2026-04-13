@@ -88,3 +88,6 @@ This project explores and implements algorithmic trading strategies for **BTC/US
 MIT License. See `LICENSE` for details.
 
 ---
+## 👥 Contributors
+
+Ankit Sinha
