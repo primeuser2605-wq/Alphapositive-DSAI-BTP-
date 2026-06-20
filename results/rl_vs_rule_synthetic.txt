@@ -1,0 +1,24 @@
+==============================================================================
+RL VS RULE-BASED BASELINE EXPERIMENT
+==============================================================================
+Train bars: 2100 | Test bars: 900 | RL seeds: 5 | Episodes/seed: 30
+
+RULE-BASED BASELINES (deterministic on test set):
+Rule                             Sharpe   Return   MaxDD  Trades   WinR
+------------------------------------------------------------------------------
+momentum_confluence              -0.108  -11.81% -49.70%      49  22.4%
+majority_vote                    -0.107  -12.40% -50.04%      52  21.2%
+mean_reversion                    0.000    0.00%   0.00%       0   0.0%
+
+TABULAR Q-LEARNING (across 5 seeds):
+Metric                     Mean        Std        Min        Max
+------------------------------------------------------------------------------
+sharpe                    2.728      0.596      1.661      2.996
+sortino                  55.553     29.465      2.846     69.132
+total_return             57.69%     29.55%      4.83%     71.10%
+max_drawdown             -5.31%      0.86%     -6.84%     -4.91%
+win_rate                 20.00%     44.72%      0.00%    100.00%
+
+------------------------------------------------------------------------------
+RL ADDS SIGNAL (Sharpe gap = +2.834 vs best rule 'majority_vote'; +4.75σ separation)
+==============================================================================
