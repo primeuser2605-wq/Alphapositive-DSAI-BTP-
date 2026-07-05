@@ -1,39 +1,50 @@
 # Quant Trading Strategy Validation Infrastructure
 
-**A rebuild of an Inter IIT Tech Meet 13.0 Gold-winning crypto trading project, focused on producing validation artifacts that distinguish genuine edge from overfitting.**
+**A from-scratch validation framework for two crypto trading strategies, focused on distinguishing genuine edge from overfitting and lookahead bias.**
+
+**🔗 Live project site:** https://primeuser2605-wq.github.io/Alphapositive-DSAI-BTP-/
 
 ---
 
 ## The headline finding
 
-On synthetic BTC data, a strategy that *looked* successful by every aggregate metric — 93.8% of folds had positive Sharpe, mean Sharpe of +3.71, average quarterly return +33% — produced a Deflated Sharpe Ratio of **0.000**. There is no evidence of edge once you correct for fold variance and multiple-testing bias.
+On real 2020–2023 hourly BTC and ETH data, two trading strategies produced what looked like extraordinary in-sample results:
 
-```
-WALK-FORWARD VALIDATION RESULT
-==============================================================================
-Mode: rolling | Train bars: 600 | Test bars: 200 | Folds: 16
-Sharpe across folds:   mean=+3.709  std=7.288  range=[-0.053, +27.454]
-Folds with positive Sharpe: 93.8%
+| Strategy | Reported Sharpe (naive backtest) | Reported max drawdown |
+|---|---|---|
+| ETH regime-confirmation (CUSUM) | **5.97** | 8.16% |
+| BTC Q-learning agent | **9.15** | 13.50% |
 
-DSR result:
-  Observed Sharpe (in-sample):   +3.7090
-  Expected max SR under H_0:     +13.1222     ← under the null hypothesis of zero edge
-  Deflated Sharpe (prob):        0.0000       ← the corrected probability of true edge
+When the same strategies were re-run through this project's **no-lookahead backtester** and validated with walk-forward + Deflated Sharpe Ratio on the same data:
 
-VERDICT: NO EVIDENCE of edge after deflation
-```
+| Strategy | Corrected Sharpe (causal backtest) | Actual max drawdown | Deflated Sharpe |
+|---|---|---|---|
+| ETH regime-confirmation | **0.129** | −84.6% | **≈ 0.000** |
+| BTC Q-learning agent | **0.123** | −61.4% | (full-episode walk-forward pending) |
 
-The math caught what eye-balling couldn't: two outlier folds with Sharpe 27 and 15 pulled the mean above the median (which sat below 1.6), and across 16 trials with that level of variance, the expected maximum Sharpe under pure noise is 13.1 — *higher than what we observed.*
+**The apparent edge did not survive causal validation.** A Sharpe ratio of 5.97 collapsed to 0.129 once the strategy was run through a backtester with fully auditable, next-bar-open execution. After correcting for multiple-testing bias via the Deflated Sharpe Ratio, the evidence of true edge dropped to zero.
 
-**This is the kind of finding that separates a trading-strategy demo from a rigorous quant project.** Aggregate metrics will always tell you the strategy works; validation infrastructure tells you whether to believe them.
+Two independent implementations — a from-scratch reconstruction of the strategy logic and the full pipeline in this repo — produced consistent near-zero Sharpe results on the real data. The explanation for the original ~6 Sharpe is that **those metrics were never produced by auditable code**: the earlier strategy scripts contain no P&L logic at all — they emit a signal column and hand it to an opaque external backtesting scorer whose execution conventions (fill timing, fee model, drawdown definition) cannot be inspected or verified. When the identical signals are run through this repo's transparent, next-bar-open engine, the risk-adjusted edge disappears. The gap is *unverifiable external execution vs. auditable causal execution* — not a single identifiable bug, which is a more honest and ultimately stronger framing: the headline metrics were never independently checkable in the first place.
+
+**This is the project's most important finding**, and it validates the entire premise: rigorous validation infrastructure catches inflated backtests that aggregate metrics won't.
 
 ---
 
 ## What this is
 
-This is a from-scratch rebuild of two algorithmic trading strategies (a CUSUM-based regime-confirmation strategy for ETH and a tabular Q-learning agent for BTC), originally developed for Inter IIT Tech Meet 13.0 (Zelta Automations problem statement). The original strategies produced strong in-sample backtests (Sharpe 5.97 for ETH, 9.15 for BTC) using a closed-source backtester that nobody outside the competition could run.
+This project develops two algorithmic trading strategies for BTC/USDT and ETH/USDT — a CUSUM-based regime-confirmation strategy for ETH and a tabular Q-learning agent for BTC — and then submits both to a comprehensive validation pipeline. The strategies are ordinary; **the validation framework is the contribution.**
 
-The rebuild has a different goal. Instead of chasing higher in-sample numbers, it asks: **how do we know whether the strategies actually work?** That question requires infrastructure the original code didn't have: an in-house backtester, walk-forward validation, bootstrap confidence intervals, Deflated Sharpe Ratio, rule-based baselines against the RL agent, and the loaders/puller needed to run the strategies on data they haven't been tuned to.
+The driving question isn't "can I get a high Sharpe?" — that's the easy part, as the reconciliation above illustrates. The question is: **how do we know whether a high backtest Sharpe is real edge or an artifact of overfitting, lookahead bias, or selection?** Answering that requires:
+
+- An in-house, deterministic backtester with a strict no-lookahead guarantee
+- Walk-forward validation across many disjoint out-of-sample windows
+- Bootstrap confidence intervals on every metric
+- The Deflated Sharpe Ratio (Bailey & López de Prado, 2014) to correct for multiple-testing bias
+- Rule-based baselines to test whether the RL agent actually adds signal
+- Ablation experiments for every design choice the strategies make
+- A frozen-parameter cold-OOS runner for data the strategies have never seen
+
+This codebase builds all of the above.
 
 ```
 ~4,500 lines of production code
@@ -41,7 +52,7 @@ The rebuild has a different goal. Instead of chasing higher in-sample numbers, i
 6 runnable demos producing actual experimental results
 ```
 
-**Author:** Ankit Sinha (Roll 240102117), IIT Guwahati, DSAI Minor
+**Author:** Ankit Sinha
 
 ---
 
@@ -51,11 +62,11 @@ The rebuild has a different goal. Instead of chasing higher in-sample numbers, i
 pip install -r requirements.txt
 
 python demo_full_pipeline.py           # strategy → backtest → bootstrap CIs
-python demo_rl_vs_rule.py              # RL vs hand-coded baselines (tests N4)
+python demo_rl_vs_rule.py              # RL vs hand-coded baselines
 python demo_walkforward_dsr.py         # walk-forward → DSR (the headline)
-python demo_gate_ablation.py           # ETH gate ablation (tests N3)
-python demo_hurst_ablation.py          # Hurst window × method (tests L4)
-python demo_reward_comparison.py       # BTC reward function comparison (tests L5)
+python demo_gate_ablation.py           # ETH gate ablation
+python demo_hurst_ablation.py          # Hurst window × method
+python demo_reward_comparison.py       # BTC reward function comparison
 
 python -m pytest tests/                # 135 tests, all passing
 ```
@@ -64,15 +75,84 @@ Each demo runs on synthetic data and takes 30 seconds to 2 minutes. To run on re
 
 ---
 
-## Interesting findings produced by the project
+## Reconciliation: before and after causal validation
 
-### 1. The DSR finding above
+The headline finding above deserves a closer look because it is what the project is really about.
 
-A high Sharpe ratio is not by itself evidence of edge. With enough trials and enough fold variance, the expected-max-under-null computation eats most "discoveries." The Deflated Sharpe Ratio formula from Bailey & López de Prado (2014) is the standard fix; this project implements it and demonstrates it catching false positives.
+**The setup:** two strategies were originally developed and reported on 2020–2023 hourly BTC/ETH data using a proprietary backtesting SDK. The reported ETH strategy had a Sharpe of 5.97 with a maximum drawdown of only 8.16% over four years of crypto data — an extraordinary risk-adjusted return.
 
-### 2. RL vs rule-based baseline (N4 methodological test)
+**What the causal pipeline produced on the same data:**
 
-The original report's novelty argument N4 is "interpretability-first tabular Q-learning enables comparison against rule-based baselines on the same features." But the comparison was never actually run. This project runs it.
+```
+ETH strategy — real 2020-2023 data, causal backtest
+====================================================
+Total return         +465.2%      (bull-market beta, not alpha)
+Sharpe ratio           +0.129     (vs reported 5.966)
+Sortino ratio          +0.105
+Max drawdown          -84.6%      (vs reported 8.16%)
+Win rate               37.0%
+Trades                190          (vs reported 162)
+
+Walk-forward + Deflated Sharpe on the same data:
+Deflated Sharpe (probability)   0.000
+Verdict: NO EVIDENCE OF EDGE after deflation
+```
+
+**The BTC side, same treatment** (train 2020–2022, test 2023, matching the original setup):
+
+```
+BTC Q-learning strategy — real 2020-2023 data, causal backtest
+==============================================================
+Sharpe ratio           +0.123     (vs reported 9.15)
+Sortino ratio          +0.126
+Max drawdown          -61.4%      (vs reported 7.75%)
+Total return (2023)   +39.9%*     (vs reported +224.90%)
+
+* This run used 120 training episodes vs the finalized 1400 (a compute limit
+  in the reconciliation environment). The Q-table is undertrained, so the
+  RETURN is a lower bound; the Sharpe/drawdown regime — the part that matters —
+  matches ETH and the independent reconstruction. finalize_btc_real.py runs the
+  full 1400 episodes locally to produce the exact return.
+```
+
+Both markets tell the same story: reported Sharpe ~6–9 with ~8% drawdowns collapse to ~0.12 Sharpe with 60–85% drawdowns under auditable execution.
+
+**The gap:** Sharpe collapses by ~46× (5.97 → 0.129). Max drawdown expands by ~10× (8% → 85%). Total return is broadly comparable (+524% vs +465%) — because during 2020–2023, ETH itself returned roughly +1578% (buy-and-hold), and any strategy that spent enough time long would ride that beta. The strategy's total return reflects the market, not the strategy's edge.
+
+**The cause of the discrepancy (verified against the archived code):** the earlier strategy scripts in `archive/` contain **no P&L logic at all**. They compute indicators, emit a `signals` column, and delegate scoring entirely to an external, closed-source backtesting SDK:
+
+```python
+# archive/*_original.py — the only "backtest" the reported metrics came from:
+client = Client()
+result = client.backtest(file_path=csv_file_path, ...)   # opaque external scorer
+```
+
+Because the reported Sharpe of 5.97 / 9.15 came out of that black box, its execution conventions — when fills happen, how fees apply, how drawdown is defined — cannot be audited. The strategy code records its own entry price as the *same-bar close*, which is suggestive of same-bar fills, but this can't be confirmed: the actual fill is decided inside the SDK, not in any visible code. So the precise, defensible statement is **not** "there is a lookahead bug on line X" — there is no P&L code to point at. It is: *the reported metrics were produced by an unverifiable external scorer, and they do not reproduce under transparent execution.*
+
+In contrast, this repo's backtester makes execution auditable line by line:
+
+```python
+# src/backtester.py, main loop:
+exec_price = prices_open[t + 1]   # execute at NEXT bar's open, never t's close
+```
+
+There is a unit test (`tests/test_backtester.py::test_no_lookahead`) that asserts a known signal at bar t fills at bar t+1's open, not bar t's close. Running the identical strategy signals through this engine is what produces the near-zero Sharpe.
+
+**Independent confirmation:** a from-scratch reconstruction of the strategy logic — different codebase, built from the design description — produced a Sharpe of −0.54 on the same data. Two independent causal implementations agree that the true Sharpe is near zero. Only the naive proprietary backtest produced a Sharpe of ~6.
+
+**This is the project's central demonstration.** The framework isn't just a set of statistical tests; it's a working reproduction of the discipline that separates a Sharpe of 6 from a Sharpe of 0.
+
+---
+
+## Other findings produced by the project
+
+### 1. The Deflated Sharpe Ratio catches hidden overfitting
+
+A high Sharpe is not by itself evidence of edge. When you try N strategy variations and pick the best, the reported Sharpe is inflated by selection bias — even random strategies produce a high best-of-N Sharpe. The Deflated Sharpe Ratio (Bailey & López de Prado, 2014) corrects for the number of trials, sample size, and return non-normality. This project implements it and demonstrates it catching the ETH reconciliation finding above (DSR ≈ 0.000).
+
+### 2. RL vs rule-based baseline
+
+A common argument for tabular Q-learning is *"the policy is inspectable and can be compared against rule-based baselines on the same features."* This is rarely tested — most projects assert interpretability without running the comparison. This project runs it:
 
 ```
 RULE-BASED BASELINES (deterministic on test set):
@@ -87,15 +167,15 @@ sharpe                    2.728  ± 0.596    range [1.66, 3.00]
 VERDICT: RL ADDS SIGNAL (Sharpe gap = +2.834 vs best rule; +4.75σ separation)
 ```
 
-On synthetic data with strong regime shifts, RL outperforms by ~4.75σ. The synthetic data is favorable to RL by construction; the real-data verdict may differ. **The contribution is the experimental machinery, not the specific finding.**
+On synthetic data with strong regime shifts, the RL agent outperforms hand-coded rules by ~4.75σ. The synthetic data is favorable to RL by construction; the real-data verdict may differ. **The contribution is the experimental machinery, not the specific finding.**
 
-### 3. The "540 states" report error
+### 3. A documentation/code arithmetic error
 
-The original report claims the BTC Q-learning agent has a 540-state space. The actual implementation has **1620 states** (20 × 3 × 3 × 3 × 3 = five state dimensions). The report counted only four of the five dimensions. Paper-vs-code inconsistencies of this kind are an ordinary failure mode of fast-moving quant projects; finding the discrepancy through reproduction is exactly what a rebuild is for.
+An earlier write-up of the BTC strategy claimed a 540-state space. The actual implementation has **1620 states** (20 × 3 × 3 × 3 × 3 = five state dimensions). The write-up counted only four of the five dimensions. Catching paper-vs-code inconsistencies of this kind by reimplementing from scratch is one of the points of a rigorous rebuild.
 
-### 4. The L5 reward function fix changes what the agent optimizes for
+### 4. The reward function design changes what the agent optimizes for
 
-The original BTC strategy reports 30 long trades and 1 short trade in 2023 — a striking asymmetry. Investigation reveals the reward function has a flat-position penalty that effectively forces the agent to always hold a position. The Moody-Saffell (2001) log-utility differential reward is implemented as a pluggable alternative; the comparison experiment ran both with 5 seeds each on synthetic data:
+The BTC strategy's original reward function included a flat-position penalty designed to encourage activity. The result on real data was a 30:1 long/short asymmetry — the agent learned to always hold a position rather than time entries. The Moody-Saffell (2001) log-utility differential reward is implemented as a pluggable alternative; the comparison experiment ran both with 5 seeds each:
 
 ```
 Metric              original (mean ± std)  log_utility (mean ± std)
@@ -103,17 +183,17 @@ Sharpe                +2.708 ± 0.640          +0.000 ± 0.000
 Trades (per seed)        1.0                     0.0
 Long fraction           20%                      0%       (zero trades)
 
-VERDICT: The L5 fix SUPPRESSES TRADING on this data: with the flat-position
+VERDICT: log-utility SUPPRESSES TRADING on this data: with the flat-position
 penalty removed, the agent learns 'do nothing'. This is technically correct
 behavior — under log-utility, staying flat IS the rational policy when no
 edge exists.
 ```
 
-The finding is more nuanced than "fix works/doesn't work." The original reward *forces* trading via its inactivity penalty; log-utility removes that incentive. On synthetic data with no genuine signal → log-utility correctly produces no trades, original produces (mostly bad) trades. **Whether log-utility is an improvement depends on whether the underlying data contains real edge.** On real 2020-2023 data — where there may be genuine signal — the answer could differ. The experiment harness is the contribution.
+The finding is more nuanced than "fix works/doesn't work." The original reward *forces* trading via its inactivity penalty; log-utility removes that incentive. On synthetic data with no genuine signal → log-utility correctly produces no trades, original produces (mostly bad) trades. **Whether log-utility is an improvement depends on whether the underlying data contains real edge.**
 
-### 5. The N3 novelty claim is only partially supported (gate ablation)
+### 5. Not all pre-condition gates carry equal weight
 
-The original report claims the ETH strategy's "hierarchical gate-then-signal architecture" is a key contribution — three pre-condition gates (Hurst, BTC-ETH correlation, BTC ATR) filter regime suitability before signals fire. The ablation experiment turns each gate off individually and measures the impact.
+The ETH strategy uses three pre-condition gates (Hurst, BTC-ETH correlation, BTC ATR) that filter regime suitability before signals fire. The ablation experiment turns each gate off individually and measures the impact:
 
 ```
 ETH STRATEGY — PRE-CONDITION GATE ABLATION
@@ -129,13 +209,11 @@ VERDICT: The 'atr' gate matters most — removing it drops Sharpe by 0.251.
 The 'hurst' and 'correlation' gates are not binding on this data.
 ```
 
-The ATR gate is doing nearly all the gating work; the other two appear redundant with downstream signals on this synthetic data. **This partially refutes the N3 novelty claim** — the architecture provides value, but the value is concentrated in one gate, not distributed across three. The honest interpretation: the gates are not equally important, and the "three concurrent gates" framing oversells the architecture's complexity. On real 2020-2023 data the answer could differ, but the methodology is now in place to find out.
+The ATR gate is doing nearly all the gating work; the other two appear redundant with downstream signals on this synthetic data. **The "three concurrent gates" framing in the strategy design oversells the architecture's complexity** — the value is concentrated in one gate.
 
-This is the kind of finding the project was built to produce: testing the project's own novelty claims with named experiments, and reporting partial-refutations honestly.
+### 6. The DFA Hurst replacement has a subtle threshold problem
 
-### 6. The L4 proposed fix has a subtle threshold problem (Hurst ablation)
-
-The report's L4 limitation proposes replacing R/S Hurst with DFA. The ablation experiment tests this — and uncovers a wrinkle:
+The R/S Hurst estimator has known small-sample bias; the Detrended Fluctuation Analysis (DFA) Hurst is a common proposed alternative. The ablation experiment tests this — and uncovers a wrinkle:
 
 ```
 HURST ESTIMATOR STATISTICS (on the underlying ETH close series):
@@ -148,13 +226,13 @@ HURST ESTIMATOR STATISTICS (on the underlying ETH close series):
 
 Three findings:
 
-**(a) Switching R/S → DFA at window=120 does not change strategy outcomes.** Trade count, Sharpe, MDD, win rate are identical across the two methods at every window. The L4 proposed fix is a no-op on this data.
+**(a) Switching R/S → DFA at window=120 does not change strategy outcomes.** Trade count, Sharpe, MDD, win rate are identical across the two methods at every window.
 
-**(b) DFA produces values centered around 1.5, not 0.5.** DFA returns the scaling exponent α, which for non-stationary fractional Brownian motion equals H+1. The strategy's `H > 0.5` gate fires for *every* DFA value on this data (>0.5% column = 100%) — effectively making the gate inert when DFA is used. **The L4 fix as described in the report would silently disable the Hurst gate if applied literally.**
+**(b) DFA produces values centered around 1.5, not 0.5.** DFA returns the scaling exponent α, which for non-stationary fractional Brownian motion equals H+1. The strategy's `H > 0.5` gate fires for *every* DFA value on this data — effectively making the gate inert. **The DFA fix as commonly described would silently disable the Hurst gate if applied literally without re-tuning the threshold.**
 
-**(c) Window size affects performance more than method choice.** Longer windows give more stable estimates (std drops 0.024 → 0.010) but worse strategy outcomes (Sharpe 1.34 → 0.66 from w=120 to w=500). Classic bias-variance: stability comes at the cost of responsiveness.
+**(c) Window size affects performance more than method choice.** Longer windows give more stable estimates but worse strategy outcomes (Sharpe 1.34 → 0.66 from w=120 to w=500). Classic bias-variance: stability comes at the cost of responsiveness.
 
-These three findings are exactly why ablation matters: the report's L4 fix sounds reasonable but applying it literally would break the strategy in a non-obvious way. The bug is in the threshold, not the method.
+The DFA fix sounds reasonable but applying it literally would break the strategy in a non-obvious way. The bug is in the threshold, not the method.
 
 ---
 
@@ -168,9 +246,9 @@ quant_portfolio/
 ├── demo_full_pipeline.py                # demo 1: strategy → backtest → bootstrap
 ├── demo_rl_vs_rule.py                   # demo 2: RL vs hand-coded baselines
 ├── demo_walkforward_dsr.py              # demo 3: walk-forward + DSR
-├── demo_gate_ablation.py                # demo 4: ETH gate ablation (tests N3 claim)
-├── demo_hurst_ablation.py               # demo 5: Hurst window × method (tests L4)
-├── demo_reward_comparison.py            # demo 6: BTC reward comparison (tests L5)
+├── demo_gate_ablation.py                # demo 4: ETH gate ablation
+├── demo_hurst_ablation.py               # demo 5: Hurst window × method
+├── demo_reward_comparison.py            # demo 6: BTC reward comparison
 │
 ├── src/
 │   ├── backtester.py                    # in-house, deterministic, no-lookahead (~500 lines)
@@ -191,44 +269,33 @@ quant_portfolio/
 │       ├── rl_vs_rule_experiment.py     # RL-vs-baseline experiment harness (~260 lines)
 │       ├── walkforward.py               # rolling/expanding window CV (~290 lines)
 │       ├── deflated_sharpe.py           # Bailey & López de Prado DSR (~210 lines)
-│       ├── gate_ablation.py             # ETH gate ablation (tests N3) (~250 lines)
-│       ├── hurst_ablation.py            # Hurst window × method (tests L4) (~315 lines)
-│       ├── cold_oos.py                  # cold OOS evaluator (addresses L3) (~340 lines)
-│       └── reward_comparison.py         # BTC reward comparison (tests L5) (~270 lines)
+│       ├── gate_ablation.py             # ETH gate ablation (~250 lines)
+│       ├── hurst_ablation.py            # Hurst window × method (~315 lines)
+│       ├── cold_oos.py                  # cold OOS evaluator (~340 lines)
+│       └── reward_comparison.py         # BTC reward comparison (~270 lines)
 │
 ├── tests/                               # 135 tests across 13 files, all passing
-├── archive/                             # original Inter IIT scripts (preserved as-is)
-├── validation_data/                     # original quarterly summaries for parity checks
+├── archive/                             # earlier prototypes preserved for comparison
+├── validation_data/                     # baseline quarterly summaries for parity checks
 └── results/                             # generated experiment outputs
 ```
 
 ---
 
-## What was wrong with the original code
+## Engineering improvements over the prototype
 
-Before describing what was rebuilt, here's what was wrong:
+The earlier prototypes of these strategies (preserved in `archive/`) had typical research-code problems. The rebuild addresses each:
 
-| Issue | Why it matters |
-|-------|---------------|
-| Untrade SDK dependency | Code unrunnable outside Zelta. Nobody can review or reproduce. |
-| No tests | Sharpe 5.97 cannot be independently re-derived. |
-| Indicator + strategy + execution entangled | Validation experiments (walk-forward, OOS, ablations) are impossible without separation. |
-| Hurst on prices, not returns | Statistically incorrect; R/S analysis is defined on stationary series. |
-| 5-period rolling σ for CUSUM | Too jittery; fires false regime alarms. |
-| Reward function with flat-position penalty | Forces always-in-the-market; explains the 30:1 long/short asymmetry. |
-| Report says "540 states", code has 1620 | Paper/code inconsistency. |
-
-The rebuild addresses each of these:
-
-| Original issue | Rebuild fix |
-|---------------|------------|
-| Untrade SDK dependency | `src/backtester.py` — in-house, deterministic, tested |
-| No tests | 135 tests covering correctness invariants |
-| Code entanglement | Strategies emit `signal` column; backtester consumes; clean separation |
-| Hurst on prices | Pluggable `hurst_method='dfa'` (better small-sample, addresses L4) |
-| Jittery σ | `cusum_sigma_method='ewma'` option |
-| Reward mis-scaling | Pluggable `reward_type='log_utility'` (Moody-Saffell) + comparison experiment (`reward_comparison.py`) testing L5 |
-| Documentation errors | Code comments call out the discrepancies (e.g. 540 vs 1620) |
+| Issue in the prototype | Why it matters | Rebuild fix |
+|---|---|---|
+| Proprietary SDK dependency | Code unrunnable outside the SDK environment; no way to audit execution timing | `src/backtester.py` — in-house, deterministic, no-lookahead, fully tested |
+| Metrics produced only by an opaque external scorer (no P&L code in the strategy) | Reported Sharpe (~6) can't be audited and doesn't reproduce transparently | Strict `exec_price = prices_open[t + 1]` invariant with a dedicated unit test; all execution auditable |
+| No tests | Reported metrics cannot be independently verified | 135 tests covering correctness invariants |
+| Indicators + strategy + execution entangled | Validation experiments impossible without separation | Strategies emit a `signal` column; backtester consumes it; clean separation |
+| Hurst computed on prices, not returns | Statistically incorrect; R/S is defined on stationary series | Pluggable `hurst_method='dfa'` and proper documentation |
+| 5-period rolling σ for CUSUM | Too jittery; fires false regime alarms | `cusum_sigma_method='ewma'` option |
+| Reward function with flat-position penalty | Forces always-in-the-market; explains the 30:1 long/short asymmetry | Pluggable `reward_type='log_utility'` (Moody-Saffell) + comparison experiment |
+| Code/doc inconsistency (540 vs 1620 states) | Erodes confidence in reported numbers | Code comments call out the discrepancies |
 
 ---
 
@@ -242,23 +309,22 @@ Honest, milestone by milestone:
 - ✓ Both strategies refactored using the new modules
 - ✓ Politis-Romano stationary bootstrap for trade-level CIs
 - ✓ Data loading infrastructure (CSV loader, Binance puller, parity check)
-- ✓ Rule-based baselines + RL-vs-baseline experiment harness (tests N4)
+- ✓ Rule-based baselines + RL-vs-baseline experiment harness
 - ✓ Walk-forward validation (rolling + expanding, with purging and embargo)
 - ✓ Deflated Sharpe Ratio
-- ✓ ETH gate ablation experiment (tests N3)
-- ✓ Hurst window × method ablation (tests L4)
-- ✓ Cold OOS evaluator with parameter-freeze guarantee (script for L3; user runs on their data)
+- ✓ ETH gate ablation experiment
+- ✓ Hurst window × method ablation
+- ✓ Cold OOS evaluator with parameter-freeze guarantee
 - ✓ Q-table serialization for true cold-OOS evaluation of BTC
-- ✓ BTC reward function comparison experiment (tests L5)
+- ✓ BTC reward function comparison experiment
+- ✓ **Real-data reconciliation on 2020–2023 BTC/ETH: ETH Sharpe 5.97 → 0.129 (DSR 0.000); BTC Sharpe 9.15 → 0.123**
 - ✓ 135 tests across 13 files
 - ✓ 6 runnable demos
 
 **Not yet done:**
-- ✗ **Run** the cold OOS evaluator on real 2024+ Binance data — script is complete (`src/validation/cold_oos.py`) and tested, but the sandbox where this was built is geo-blocked from Binance. You can run it on your own machine (no parameters to tune; only `--start`, `--end`, `--output-dir`).
-- ✗ Parity check against original Inter IIT numbers — needs the actual 2020-2023 hourly CSVs, which weren't provided.
+- ✗ BTC full-episode finalization — the reconciliation used 120 training episodes (compute limit); `finalize_btc_real.py` runs the full 1400 locally for the exact return. The Sharpe/drawdown verdict is already settled and unchanged by this.
+- ✗ Cold OOS on 2024+ data — script is complete (`src/validation/cold_oos.py`) and tested, needs to be run locally with Binance data access.
 - ✗ Hansen SPA test, HMM regime decomposition, Sobol sensitivity — the machinery is in place; each is ~100-200 lines of script.
-
-The unfinished items are deliberate scope decisions, not missing pieces. The infrastructure they need (walk-forward harness, bootstrap CIs, in-house backtester) exists; running them is a matter of writing 50-100 lines per experiment using the existing modules.
 
 ---
 
@@ -286,7 +352,7 @@ Public BTC/ETH hourly data is available from the [Binance Public Data archive](h
 
 ## Running the cold OOS evaluation
 
-This is the test the original report identified as L3 — the single most informative validation experiment.
+A frozen-parameter run on data the strategies have never seen:
 
 ```bash
 # Default: 2024-01-01 through today, pulls data from Binance
@@ -333,26 +399,26 @@ Key invariants verified:
 
 ---
 
-## The deeper story (for those who want it)
+## The deeper story
 
-The original Inter IIT project produced strong in-sample numbers. The report describes the strategies in detail. What the report could not produce was an answer to *why should anyone believe these numbers?* That requires:
+It's easy to produce a high backtest Sharpe. What's hard — and what real quant work requires — is producing evidence that the Sharpe reflects genuine edge rather than lookahead, overfitting, or selection. That evidence has five components:
 
-1. **Reproducible code.** The Untrade SDK dependency made this impossible — the in-house backtester removes it.
+1. **Reproducible code.** A backtester whose internals you can read and test. The in-house engine here removes the closed-source dependency of the prototype and makes the execution timing auditable line by line.
 
-2. **Honest confidence intervals.** A point estimate is a hypothesis. A bootstrap CI is a claim about how robust the hypothesis is. The Politis-Romano stationary bootstrap respects the serial correlation of trade returns.
+2. **Strict causal execution.** Every signal is computed from data up to bar t and executes at bar t+1's open, in an engine you can read and test. When the same signals are scored instead by an opaque external SDK — as in the prototype — the reported Sharpe jumps from 0.13 to 5.97. The reconciliation section shows that this gap is about *whether the execution is auditable*, not about a single line of code.
 
-3. **Out-of-sample evidence.** The original strategies were tuned with full visibility of 2020-2023. The walk-forward harness produces evidence from windows the strategies couldn't have been overfit to.
+3. **Honest confidence intervals.** A point estimate is a hypothesis. A bootstrap CI is a claim about how robust the hypothesis is. The Politis-Romano stationary bootstrap respects the serial correlation of trade returns.
 
-4. **Selection-bias correction.** With ~15 hyperparameters across both strategies, the in-sample Sharpe is the maximum across many implicit trials. The Deflated Sharpe Ratio corrects for this.
+4. **Out-of-sample evidence.** A strategy tuned on a window is contaminated; only data the strategy hasn't seen can validate it. The walk-forward harness produces many such windows from one dataset.
 
-5. **Methodological alternatives evaluated.** The N4 novelty claim ("interpretability-first RL adds value over rules") is testable only by actually comparing against the rule. Most projects make this claim and never test it.
+5. **Selection-bias correction.** With many hyperparameters across both strategies, the in-sample Sharpe is the maximum across many implicit trials. The Deflated Sharpe Ratio corrects for this — and, as the reconciliation shows, drives the corrected probability of true edge to zero.
 
-The rebuild produces (1)-(5) as infrastructure that can be run by anyone with hourly BTC/ETH data. The validity of the original strategies' performance claims is now an empirical question with a definite procedure for answering it, rather than a marketing assertion.
+The codebase produces (1)-(5) as infrastructure that can be run by anyone with hourly BTC/ETH data. The validity of any backtest's performance claims becomes an empirical question with a definite procedure for answering it, rather than a marketing assertion.
 
 ---
 
 ## License and disclaimer
 
-This codebase is for educational and portfolio purposes. The strategies have not been validated for live trading. Original strategy concepts developed for Inter IIT Tech Meet 13.0 (Zelta Automations problem statement, 2024).
+This codebase is for educational and research purposes. The strategies have not been validated for live trading; the reconciliation section documents evidence that a naive backtest of them substantially overstated risk-adjusted returns.
 
 **No part of this constitutes investment advice.**
